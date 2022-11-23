@@ -34,6 +34,8 @@ def generate_images(G, n_images):
     return None
 
 def train_GAN(G, D, train_loader, G_optimizer, D_optimizer, train_epoch):
+    G.train()
+    D.train()
     fixed_z_ = torch.randn((5 * 5, 100))    # fixed noise
     fixed_z_ = Variable(fixed_z_, volatile=True)
 
