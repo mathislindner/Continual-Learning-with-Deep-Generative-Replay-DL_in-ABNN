@@ -7,7 +7,56 @@ import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.autograd import Variable
 from tqdm import tqdm
+import random
 
+def test_model(model, n, test_loader):
+    model.eval()
+    correct = 0
+    for x_, y_, _ in test_loader:
+        x_ = x_.view(-1, 28 * 28)
+        x_, y_ = Variable(x_), Variable(y_)
+        output = model(x_)
+        pred = output.data.max(1, keepdim=True)[1]
+        correct += pred.eq(y_.data.view_as(pred)).cpu().sum()
+    accuracy = correct / len(test_loader.dataset)
+    print('Test Accuracy of the model on the {} test images: {} %'.format(n, 100 * correct / len(test_loader.dataset)))
+    return accuracy
+
+def get_data_loaders(n, batch_size):
+    random.seed(42)
+    # randomly select 2 out of 10 classes
+    classes = random.sample(range(10), 10)
+    classes_train = classes[2*n:2*n+2]
+    classes_test = classes[:2*n+2]
+
+    transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
+    ])
+
+    MNIST_train_full = datasets.MNIST(root='./data', train=True, transform=transform, download=True)
+    MNIST_test_full = datasets.MNIST(root='./data', train=False, transform=transform, download=True)
+    MNIST_train_n = torch.utils.data.Subset(MNIST_train_full, [i for i, (x, y) in enumerate(MNIST_train_full) if y in classes_train])
+    MNIST_test_n = torch.utils.data.Subset(MNIST_test_full, [i for i, (x, y) in enumerate(MNIST_test_full) if y in classes_test])
+
+    train_loader = torch.utils.data.DataLoader(MNIST_train_n, batch_size=batch_size, shuffle=True)
+    test_loader = torch.utils.data.DataLoader(MNIST_test_n, batch_size=batch_size, shuffle=True)
+    return train_loader, test_loader
+
+def generate_data(G, D, n_images):
+    G.eval()
+    fixed_z_ = torch.randn((n_images, 100))    # fixed noise
+    test_images = G(fixed_z_)
+    test_images = test_images.view(test_images.size(0), 1, 28, 28)
+    test_images = test_images.data
+
+    D.eval()
+    test_images = test_images.view(-1, 28 * 28)
+    test_images = Variable(test_images)
+    output = D(test_images)
+    pred = output.data.max(1, keepdim=True)[1]
+    dataset = torch.utils.data.TensorDataset(test_images, pred)
+    return dataset
 
 def get_accuracies(evaluations):
     accuracies = []
