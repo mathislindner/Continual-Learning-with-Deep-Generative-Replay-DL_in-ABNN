@@ -7,6 +7,80 @@ import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.autograd import Variable
 from tqdm import tqdm
+import random
+
+
+def test_model(model, test_loader):
+    model.eval()
+    correct = 0
+    for x_, y_ in test_loader:
+        x_ = x_.view(-1, 28 * 28)
+        x_, y_ = Variable(x_), Variable(y_)
+        output = model(x_)
+        pred = output.data.max(1, keepdim=True)[1]
+        correct += pred.eq(y_.data.view_as(pred)).cpu().sum()
+    accuracy = correct / len(test_loader.dataset)
+    print('Test Accuracy of the model on the test images: {} %'.format( 100 * correct / len(test_loader.dataset)))
+    return accuracy
+
+def get_datasets(n, transform):
+    random.seed(42)
+    # randomly select 2 out of 10 classes
+    classes = random.sample(range(10), 10)
+    classes_train = classes[2*n:2*n+2] # 2 classes for training
+    classes_test = classes[:2*n+2] #all classes seen so far
+
+    MNIST_train_full = datasets.MNIST(root='./data', train=True, transform=transform, download=True)
+    MNIST_test_full = datasets.MNIST(root='./data', train=False, transform=transform, download=True)
+
+    #get indices of the classes we want
+    train_indices = [i for i, x in enumerate(MNIST_train_full.targets) if x in classes_train]
+    test_indices = [i for i, x in enumerate(MNIST_test_full.targets) if x in classes_test]
+
+    #create new datasets with only the classes we want
+    #get subset of the data
+    MNIST_train = MNIST_train_full.data[train_indices].float()
+    MNIST_train_targets = MNIST_train_full.targets[train_indices]
+    MNIST_test = MNIST_test_full.data[test_indices].float()
+    MNIST_test_targets = MNIST_test_full.targets[test_indices]
+
+    #create new datasets
+    MNIST_train = DS_from_tensors(MNIST_train, MNIST_train_targets)
+    MNIST_test = DS_from_tensors(MNIST_test, MNIST_test_targets)
+    
+    return MNIST_train, MNIST_test
+
+class DS_from_tensors(torch.utils.data.Dataset):
+    def __init__(self, data, targets):
+        self.data = data
+        self.targets = targets
+
+    def __getitem__(self, index):
+        x = self.data[index]
+        y = self.targets[index]
+        return x, y
+    
+    def __len__(self):
+        return len(self.data)
+    
+
+def generate_data(G,  classifier, n_images, batch_size = 128):
+    #create fake images, label them and return them as a dataset of tensors
+    loops = int(n_images/batch_size)
+    G.eval()
+    classifier.eval()
+    fake_images = torch.zeros((loops*batch_size, 28, 28))
+    fake_labels = torch.zeros((loops*batch_size))
+    for i in range(loops):
+        fixed_noise = torch.randn(batch_size, 100)
+        new_images = G(fixed_noise)
+        pred = classifier(new_images)
+        new_labels = pred.data.max(1, keepdim=True)[1]
+        fake_images[i*batch_size:(i+1)*batch_size] = new_images.reshape(batch_size, 28, 28)
+        fake_labels[i*batch_size:(i+1)*batch_size] = new_labels.reshape(batch_size)
+
+    dataset = DS_from_tensors(fake_images, fake_labels.long())
+    return dataset
 
 
 def get_accuracies(evaluations):
@@ -22,35 +96,29 @@ def get_accuracies(evaluations):
     return accuracies
 
 # create a grid of 5x5 images
-def generate_images(G, n_images):
+def generate_images(G,  n_images = 25):
     G.eval()
-    fixed_z_ = torch.randn((5 * 5, 100))    # fixed noise
-    test_images = G(fixed_z_)
+    fixed_noise = torch.randn(n_images, 100)
+    test_images = G(fixed_noise)
     test_images = test_images.view(test_images.size(0), 1, 28, 28)
     test_images = test_images.data
     grid = torchvision.utils.make_grid(test_images)
-    plt.imshow(grid.numpy().transpose((1, 2, 0)))
-    plt.show()
-    return None
+    return grid
 
-def train_GAN(G, D, train_loader, G_optimizer, D_optimizer, train_epoch):
+def train_GAN(G, D, train_loader, G_optimizer, D_optimizer, BCE_loss,  train_epoch):
     G.train()
     D.train()
-    fixed_z_ = torch.randn((5 * 5, 100))    # fixed noise
-    fixed_z_ = Variable(fixed_z_, volatile=True)
 
-    # data_loader
-    transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
-    ])
-
-    # Binary Cross Entropy loss
-    BCE_loss = nn.BCELoss()
     for epoch in range(train_epoch):
         D_losses = []
         G_losses = []
-        for x_, _, _ in tqdm(train_loader):
+        for x_, _ in train_loader:
+            #wrap in variable
+            x_ = Variable(x_)
+
+            # add minor noise to the data
+            x_ = x_ + 0.5 * torch.randn(x_.size())
+
             D.zero_grad()
             # convert x_ to tensor
             #x_ = torch.tensor(x_).view(-1, 28 * 28)
