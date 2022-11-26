@@ -115,6 +115,10 @@ def train_GAN(G, D, train_loader, G_optimizer, D_optimizer, BCE_loss,  train_epo
         for x_, _ in train_loader:
             #wrap in variable
             x_ = Variable(x_)
+
+            # add minor noise to the data
+            x_ = x_ + 0.5 * torch.randn(x_.size())
+
             D.zero_grad()
             # convert x_ to tensor
             #x_ = torch.tensor(x_).view(-1, 28 * 28)
